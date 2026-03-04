@@ -1,98 +1,354 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# SentinelSuite – ZeroTrust Gateway
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+## Introducción
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Este proyecto implementa un **Zero Trust Gateway** para proteger múltiples servicios internos.
 
-## Description
+El principio de Zero Trust es:
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+> Never trust, always verify.
 
-## Project setup
+Esto significa que **ninguna request se considera confiable por defecto**, incluso si proviene de dentro del sistema.
 
-```bash
-$ yarn install
+Cada request debe verificarse antes de acceder a un servicio.
+
+---
+
+## Problema que resuelve
+
+En una arquitectura tradicional:
+
+```
+Client → Service
 ```
 
-## Compile and run the project
+Los servicios confían en:
 
-```bash
-# development
-$ yarn run start
+- headers
+- IP interna
+- red privada
 
-# watch mode
-$ yarn run start:dev
+Esto permite ataques como:
 
-# production mode
-$ yarn run start:prod
+- bypass del gateway
+- falsificación de headers
+- modificación de requests
+- replay attacks
+
+El ZeroTrust Gateway evita estos problemas.
+
+---
+
+## Arquitectura del sistema
+
+```
+                ┌──────────────┐
+                │   Client     │
+                │ (Web / API)  │
+                └──────┬───────┘
+                       │
+                       │ HTTPS
+                       ▼
+               ┌─────────────────┐
+               │ ZeroTrust GW    │
+               │ (NestJS)        │
+               │                 │
+               │ 1. Verify JWT   │
+               │ 2. Policy check │
+               │ 3. Sign request │
+               └──────┬──────────┘
+                      │
+                      │ signed request
+                      ▼
+       ┌───────────────────────────────┐
+       │        Upstream Services      │
+       │                               │
+       │  Vault API                    │
+       │  Payments API                 │
+       │  Notary API                   │
+       │                               │
+       │  Verify ZT Signature          │
+       │  Validate nonce               │
+       └───────────────────────────────┘
 ```
 
-## Run tests
+El gateway actúa como **portero de seguridad**.
 
-```bash
-# unit tests
-$ yarn run test
+---
 
-# e2e tests
-$ yarn run test:e2e
+# Flujo de una request
 
-# test coverage
-$ yarn run test:cov
+## 1. Cliente llama al gateway
+
+Ejemplo:
+
+```
+POST /vault/documents
+Authorization: Bearer <JWT>
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## 2. Gateway valida el usuario
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+El gateway valida el JWT y obtiene:
 
-```bash
-$ yarn install -g @nestjs/mau
-$ mau deploy
+- userId
+- tenantId
+- roles
+
+---
+
+## 3. Policy Engine
+
+El gateway evalúa las políticas de acceso.
+
+Ejemplo:
+
+- ADMIN → puede subir documentos
+- MEMBER → solo puede leer
+
+Si no cumple la política:
+
+```
+403 Forbidden
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+---
 
-## Resources
+## 4. Firma de request
 
-Check out a few resources that may come in handy when working with NestJS:
+El gateway firma la request antes de enviarla al servicio downstream.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+Se agregan headers:
 
-## Support
+- `x-zt-v`
+- `x-zt-user-id`
+- `x-zt-tenant-id`
+- `x-zt-roles`
+- `x-zt-ts`
+- `x-zt-nonce`
+- `x-zt-body-sha256`
+- `x-zt-sig`
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+---
 
-## Stay in touch
+# Canonical Request
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Antes de generar la firma se construye una **canonical request**.
 
-## License
+Ejemplo:
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```text
+v:1
+method:POST
+path:/documents
+query:vaultId=123
+body_sha256:abc123...
+user_id:1
+tenant_id:1
+roles:ADMIN
+ts:1710000000
+nonce:550e8400-e29b-41d4-a716-446655440000
+```
+
+Esto evita que alguien modifique partes de la request.
+
+---
+
+# Firma HMAC
+
+La firma se calcula usando HMAC-SHA256.
+
+```
+signature = HMAC(secret, canonical_request)
+```
+
+Solo dos componentes conocen el secreto:
+
+- Gateway
+- Servicios internos
+
+---
+
+# Verificación en el servicio downstream
+
+Cuando el servicio recibe la request:
+
+1. reconstruye canonical request
+2. recalcula la firma
+3. compara con `x-zt-sig`
+
+Si la firma no coincide:
+
+```
+403 Invalid Signature
+```
+
+---
+
+# Protección contra Replay Attacks
+
+Cada request incluye:
+
+- `x-zt-ts`
+- `x-zt-nonce`
+
+El sistema guarda temporalmente los nonce usados.
+
+Si un nonce se repite:
+
+```
+Replay attack detected
+```
+
+---
+
+# Seguridad que aporta el sistema
+
+| Ataque | Protección |
+|------|------|
+| Header spoofing | Firma HMAC |
+| Tampering de request | Canonical request |
+| Modificación de body | SHA256 |
+| Replay attack | Nonce store |
+| Bypass del gateway | Verificación ZT |
+| Escalación de privilegios | Policy engine |
+
+---
+
+# Estructura del proyecto
+
+```
+src
+├ common
+│ ├ crypto
+│ │ ├ canonical.ts
+│ │ └ hmac-signer.ts
+│ │
+│ └ zt
+│   ├ zt-verify.ts
+│   └ nonce-store.ts
+│
+├ modules
+│ ├ gateway
+│ ├ auth
+│ └ policy
+│
+└ config
+  ├ jwt.config.ts
+  ├ upstreams.config.ts
+  └ zt.config.ts
+```
+
+---
+
+# Componentes
+
+## Gateway
+
+Responsable de:
+
+- validar JWT
+- aplicar políticas
+- firmar requests
+- proxy a servicios
+
+---
+
+## Auth Module
+
+Valida tokens JWT.
+
+Archivo principal:
+
+```
+jwt-verify.service.ts
+```
+
+---
+
+## Policy Engine
+
+Define reglas de acceso.
+
+Ejemplo:
+
+- ADMIN → write
+- MEMBER → read
+
+---
+
+## Crypto
+
+### canonical.ts
+
+Genera la canonical request.
+
+### hmac-signer.ts
+
+Genera la firma HMAC.
+
+---
+
+## ZeroTrust Verification
+
+### zt-verify.ts
+
+Valida los headers firmados.
+
+### nonce-store.ts
+
+Previene replay attacks.
+
+---
+
+# Ejemplo de request real
+
+Cliente:
+
+```
+POST /vault/documents
+```
+
+Gateway agrega:
+
+```
+x-zt-user-id: 123
+x-zt-tenant-id: tenantA
+x-zt-roles: ADMIN
+x-zt-ts: 1710000000
+x-zt-nonce: 550e8400-e29b-41d4-a716-446655440000
+x-zt-body-sha256: abc123...
+x-zt-sig: 92fd21...
+```
+
+El servicio downstream verifica la firma antes de procesar la request.
+
+---
+
+# Roadmap
+
+Próximos pasos del proyecto:
+
+1. Policy engine configurable (`policies.yaml`)
+2. Admin UI (Electron)
+3. Redis nonce store
+4. Rate limiting
+5. mTLS interno
+
+---
+
+# Tecnologías
+
+- Node.js
+- NestJS
+- HMAC-SHA256
+- JWT
+- Zero Trust Architecture
+
+---
+
+# Licencia
+
+MIT
