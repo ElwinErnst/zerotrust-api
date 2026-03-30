@@ -23,7 +23,22 @@ export class PolicyService {
   }
 
   private requireRole(input: PolicyInput, role: string): PolicyDecision {
-    if (input.roles.includes(role)) return { allow: true };
+    if (this.hasRequiredRole(input.roles, role)) return { allow: true };
     return { allow: false, reason: `Missing role ${role}` };
+  }
+
+  private hasRequiredRole(userRoles: string[], requiredRole: string): boolean {
+    const hierarchy: Record<string, number> = {
+      MEMBER: 1,
+      ADMIN: 2,
+      OWNER: 3,
+    };
+
+    const requiredLevel = hierarchy[requiredRole] ?? Number.MAX_SAFE_INTEGER;
+
+    return userRoles.some((role) => {
+      const level = hierarchy[role];
+      return typeof level === 'number' && level >= requiredLevel;
+    });
   }
 }

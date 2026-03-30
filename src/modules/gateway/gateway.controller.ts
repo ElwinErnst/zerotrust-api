@@ -35,6 +35,31 @@ function chunkToBuffer(chunk: unknown): Buffer {
   throw new Error('Unsupported request body chunk type');
 }
 
+function ensureMaxBodyBytes(body: Buffer, maxBytes: number): Buffer {
+  if (body.length > maxBytes) throw new Error('Body too large');
+  return body;
+}
+
+function readParsedBodyToBuffer(body: unknown, maxBytes: number): Buffer {
+  if (body === undefined || body === null) {
+    return Buffer.alloc(0);
+  }
+
+  if (Buffer.isBuffer(body)) {
+    return ensureMaxBodyBytes(body, maxBytes);
+  }
+
+  if (body instanceof Uint8Array) {
+    return ensureMaxBodyBytes(Buffer.from(body), maxBytes);
+  }
+
+  if (typeof body === 'string') {
+    return ensureMaxBodyBytes(Buffer.from(body), maxBytes);
+  }
+
+  return ensureMaxBodyBytes(Buffer.from(JSON.stringify(body)), maxBytes);
+}
+
 /**
  * Lee el body del Request (stream) y lo convierte a Buffer, con límite.
  * Esto evita streaming+undici typing issues y elimina los "unsafe".
@@ -55,6 +80,17 @@ async function readReqBodyToBuffer(
   }
 
   return Buffer.concat(chunks);
+}
+
+async function resolveReqBodyToBuffer(
+  req: Request,
+  maxBytes: number,
+): Promise<Buffer> {
+  if (typeof req.body !== 'undefined') {
+    return readParsedBodyToBuffer(req.body, maxBytes);
+  }
+
+  return readReqBodyToBuffer(req, maxBytes);
 }
 
 @Controller()
@@ -102,7 +138,7 @@ export class GatewayController {
     const maxBodyBytes = 25 * 1024 * 1024; // 25MB
     const bodyBuf = isBodyless(req.method)
       ? Buffer.alloc(0)
-      : await readReqBodyToBuffer(req, maxBodyBytes);
+      : await resolveReqBodyToBuffer(req, maxBodyBytes);
 
     const signed = signZtRequest({
       secret: this.hmacSecret,
