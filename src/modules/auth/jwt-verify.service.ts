@@ -1,9 +1,10 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { AuthUser } from './types';
-
-type JwtConfig = { issuer: string; audience: string; hs256Secret: string };
+import type { AuthUser } from './types';
+import type { JwtConfig } from './types/jwt-config.type';
+import type { JwtHeader } from './types/jwt-header.type';
+import type { JwtPayload } from './types/jwt-payload.type';
 
 function base64UrlDecodeToBuffer(input: string): Buffer {
   const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4));
@@ -15,16 +16,6 @@ function safeJsonParse<T>(buf: Buffer): T {
   const s = buf.toString('utf8');
   return JSON.parse(s) as T;
 }
-
-type JwtHeader = { alg: string; typ?: string };
-type JwtPayload = {
-  sub: string;
-  iss: string;
-  aud?: string | string[];
-  exp: number;
-  tenantId?: string;
-  roles?: string[];
-};
 
 @Injectable()
 export class JwtVerifyService {
@@ -82,7 +73,18 @@ export class JwtVerifyService {
 
     if (!tenantId) throw new UnauthorizedException('Missing tenantId claim');
 
-    return { sub: payload.sub, tenantId, roles };
+    return {
+      sub: payload.sub,
+      tenantId,
+      roles,
+      ...(payload.actorType == null ? {} : { actorType: payload.actorType }),
+      ...(payload.clientAppId == null
+        ? {}
+        : { clientAppId: payload.clientAppId }),
+      ...(payload.serviceAccountId == null
+        ? {}
+        : { serviceAccountId: payload.serviceAccountId }),
+    };
   }
 
   private audienceOk(aud: JwtPayload['aud']): boolean {

@@ -6,5 +6,6 @@ export type PolicyInput = {
   upstream: UpstreamName;
   method: string;
   path: string; // path ya “upstream-local” (sin /vault prefix)
+  tenantId: string;
   roles: string[];
 };

@@ -7,9 +7,8 @@ import {
   UpstreamsFile,
   UpstreamsFileSchema,
 } from './types';
-
-type PoliciesCfg = { filePath: string };
-type UpstreamsCfg = { filePath?: string; upstreams?: unknown };
+import type { PoliciesConfig } from './types/policies-config.type';
+import type { UpstreamsConfig } from './types/upstreams-config.type';
 
 @Injectable()
 export class AdminService {
@@ -42,7 +41,7 @@ export class AdminService {
   }
 
   private async loadPoliciesFromFile(): Promise<PoliciesFile> {
-    const p = this.cfg.get<PoliciesCfg>('policies');
+    const p = this.cfg.get<PoliciesConfig>('policies');
     if (!p?.filePath) return { version: 1, rules: [] };
 
     const raw = await readFile(p.filePath, 'utf8');
@@ -59,7 +58,7 @@ export class AdminService {
 
   private async loadUpstreamsFromFile(): Promise<UpstreamsFile> {
     // tu proyecto ya tiene upstreams.config.ts: si querés “solo archivo”, agregá ZT_UPSTREAMS_FILE
-    const p = this.cfg.get<UpstreamsCfg>('upstreams');
+    const p = this.cfg.get<UpstreamsConfig>('upstreams');
 
     // Prioridad: archivo si está configurado
     const filePath =
