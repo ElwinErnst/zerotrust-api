@@ -47,7 +47,9 @@ export class ZtGuard implements CanActivate {
     });
 
     if (!result.ok) {
-      throw new ForbiddenException(`ZT: ${result.reason}`);
+      throw new ForbiddenException(
+        `ZT: ${'reason' in result ? result.reason : 'verification failed'}`,
+      );
     }
 
     // attach identity to request

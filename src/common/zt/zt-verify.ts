@@ -25,6 +25,18 @@ function getHeader(h: HeadersMap, key: string): string | null {
   return null;
 }
 
+function evictExpiredReplayEntries(
+  replayCache: Map<string, number>,
+  now: number,
+  maxSkewMs: number,
+) {
+  for (const [key, seenAt] of replayCache.entries()) {
+    if (now - seenAt > maxSkewMs) {
+      replayCache.delete(key);
+    }
+  }
+}
+
 export function verifyZtRequest(input: {
   secret: string;
   method: string;
@@ -64,6 +76,7 @@ export function verifyZtRequest(input: {
   if (!Number.isFinite(ts)) return { ok: false, reason: 'Invalid timestamp' };
 
   const now = Date.now();
+  evictExpiredReplayEntries(replayCache, now, maxSkewMs);
   if (Math.abs(now - ts) > maxSkewMs) {
     return { ok: false, reason: 'Timestamp outside allowed window' };
   }
