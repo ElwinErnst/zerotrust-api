@@ -1,11 +1,44 @@
 import { Injectable } from '@nestjs/common';
+import { AuthDirectoryService } from '../../common/modules/auth-directory/auth-directory.service';
 import { PolicyDecision, PolicyInput } from './types';
 
 @Injectable()
 export class PolicyService {
-  decide(input: PolicyInput): PolicyDecision {
+  constructor(private readonly authDirectory: AuthDirectoryService) {}
+
+  async decide(input: PolicyInput): Promise<PolicyDecision> {
+    const entitlements = await this.authDirectory.getTenantEntitlements(
+      input.tenantId,
+    );
+
+    if (!entitlements) {
+      return { allow: false, reason: 'Tenant entitlements not found' };
+    }
+
+    const isApiClient = !this.hasHumanRole(input.roles);
+
     // MVP: reglas para Vault
     if (input.upstream === 'vault') {
+      if (!entitlements.features.vaults) {
+        return {
+          allow: false,
+          reason: 'Vault access is not enabled for this tenant plan',
+        };
+      }
+
+      // Los clientes API no comparten la misma política que el workspace humano.
+      // Si el token no trae roles humanos, tratamos el request como integración externa.
+      if (isApiClient) {
+        if (!entitlements.features.apiVault) {
+          return {
+            allow: false,
+            reason: 'Vault API Pack is not enabled for this tenant',
+          };
+        }
+
+        return this.allowApiClientVaultRoute(input);
+      }
+
       // Ejemplos:
       // - listar docs: MEMBER
       // - subir/borrar: ADMIN
@@ -40,5 +73,31 @@ export class PolicyService {
       const level = hierarchy[role];
       return typeof level === 'number' && level >= requiredLevel;
     });
+  }
+
+  private hasHumanRole(userRoles: string[]): boolean {
+    return userRoles.some((role) =>
+      ['MEMBER', 'ADMIN', 'OWNER'].includes(role),
+    );
+  }
+
+  private allowApiClientVaultRoute(input: PolicyInput): PolicyDecision {
+    const method = input.method.toUpperCase();
+    const path = input.path;
+
+    const allowed =
+      (method === 'GET' && path === '/vaults') ||
+      (method === 'POST' && path === '/documents') ||
+      (method === 'GET' && path === '/documents') ||
+      (method === 'GET' && /^\/documents\/[^/]+\/download$/.test(path));
+
+    if (allowed) {
+      return { allow: true };
+    }
+
+    return {
+      allow: false,
+      reason: 'API client is not allowed on this Vault route',
+    };
   }
 }

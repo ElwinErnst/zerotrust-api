@@ -13,10 +13,10 @@ import { ConfigService } from '@nestjs/config';
 
 import { JwtVerifyService } from '../auth/jwt-verify.service';
 import { PolicyService } from '../policy/policy.service';
+import { BillingMeteringService } from '../../common/modules/billing-metering/billing-metering.service';
 import { GatewayService } from './gateway.service';
 import { signZtRequest } from '../../common/crypto/hmac-signer';
-
-type ZtCfg = { hmacSecret: string };
+import type { ZtConfig } from './types/zt-config.type';
 
 function splitUrl(originalUrl: string): { path: string; query: string } {
   const [p, q] = originalUrl.split('?');
@@ -60,6 +60,22 @@ function readParsedBodyToBuffer(body: unknown, maxBytes: number): Buffer {
   return ensureMaxBodyBytes(Buffer.from(JSON.stringify(body)), maxBytes);
 }
 
+function shouldForwardResponseHeader(name: string): boolean {
+  const key = name.toLowerCase();
+
+  return ![
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+    'content-length',
+  ].includes(key);
+}
+
 /**
  * Lee el body del Request (stream) y lo convierte a Buffer, con límite.
  * Esto evita streaming+undici typing issues y elimina los "unsafe".
@@ -93,7 +109,7 @@ async function resolveReqBodyToBuffer(
   return readReqBodyToBuffer(req, maxBytes);
 }
 
-@Controller()
+@Controller('vault')
 export class GatewayController {
   private readonly hmacSecret: string;
 
@@ -101,9 +117,10 @@ export class GatewayController {
     private readonly gw: GatewayService,
     private readonly jwt: JwtVerifyService,
     private readonly policy: PolicyService,
+    private readonly billingMetering: BillingMeteringService,
     cfg: ConfigService,
   ) {
-    const zt = cfg.get<ZtCfg>('zt');
+    const zt = cfg.get<ZtConfig>('zt');
     if (!zt) throw new Error('Missing zt config');
     this.hmacSecret = zt.hmacSecret;
   }
@@ -125,14 +142,58 @@ export class GatewayController {
 
     const user = this.jwt.verifyBearer(bearer);
 
-    const decision = this.policy.decide({
+    const decision = await this.policy.decide({
       upstream: resolved.upstream.name,
       method: req.method,
       path: resolved.upstreamPath,
+      tenantId: user.tenantId,
       roles: user.roles,
     });
 
-    if (!decision.allow) throw new ForbiddenException(decision.reason);
+    if (!decision.allow) {
+      throw new ForbiddenException(
+        'reason' in decision ? decision.reason : 'Policy denied request',
+      );
+    }
+
+    const isApiClient = user.roles.includes('API_CLIENT');
+    if (isApiClient && resolved.upstream.name === 'vault') {
+      const metrics = ['vault_api_requests'];
+      const upperMethod = req.method.toUpperCase();
+
+      if (
+        upperMethod === 'POST' &&
+        resolved.upstreamPath === '/documents'
+      ) {
+        metrics.push('vault_api_upload_requests');
+      }
+
+      if (
+        upperMethod === 'GET' &&
+        /\/documents\/[^/]+\/download$/.test(resolved.upstreamPath)
+      ) {
+        metrics.push('vault_api_download_requests');
+      }
+
+      await Promise.all(
+        metrics.map((metric) =>
+          this.billingMetering.recordUsageEvent({
+            tenantId: user.tenantId,
+            addonCode: 'VAULT_API',
+            metric,
+            quantity: 1,
+            sourceService: 'zerotrust-api',
+            actorType: user.actorType ?? 'user',
+            clientAppId: user.clientAppId,
+            serviceAccountId: user.serviceAccountId,
+            metadata: {
+              method: upperMethod,
+              path: resolved.upstreamPath,
+            },
+          }),
+        ),
+      );
+    }
 
     // Bufferizamos body (MVP safe) para evitar problemas de types/streaming con undici
     const maxBodyBytes = 25 * 1024 * 1024; // 25MB
@@ -175,10 +236,6 @@ export class GatewayController {
 
     res.status(upstreamRes.statusCode);
 
-    for (const [k, v] of Object.entries(upstreamRes.headers)) {
-      if (typeof v === 'string') res.setHeader(k, v);
-    }
-
     // Respuesta como Buffer (evita Readable.fromWeb / pipeTo / casts)
     if (!upstreamRes.body) {
       res.end();
@@ -187,6 +244,14 @@ export class GatewayController {
 
     const ab = await upstreamRes.body.arrayBuffer();
     const out = Buffer.from(ab);
+
+    for (const [k, v] of Object.entries(upstreamRes.headers)) {
+      if (typeof v === 'string' && shouldForwardResponseHeader(k)) {
+        res.setHeader(k, v);
+      }
+    }
+
+    res.setHeader('content-length', String(out.length));
     res.send(out);
   }
 }

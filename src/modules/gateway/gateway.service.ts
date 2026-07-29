@@ -1,17 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
-import { UpstreamConfig } from '../../config/upstreams.config';
-import { ResolvedUpstream } from './types';
-
-type UpstreamsCfg = { upstreams: UpstreamConfig[] };
+import type { UpstreamConfig } from '../../config/upstreams.config';
+import type { ResolvedUpstream } from './types';
+import type { UpstreamsConfig } from './types/upstreams-config.type';
 
 @Injectable()
 export class GatewayService {
   private readonly upstreams: UpstreamConfig[];
 
   constructor(cfg: ConfigService) {
-    const c = cfg.get<UpstreamsCfg>('upstreams');
+    const c = cfg.get<UpstreamsConfig>('upstreams');
     if (!c) throw new Error('Missing upstreams config');
     this.upstreams = c.upstreams;
   }

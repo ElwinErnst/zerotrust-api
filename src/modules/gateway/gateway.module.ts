@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BillingMeteringService } from '../../common/modules/billing-metering/billing-metering.service';
 import { GatewayController } from './gateway.controller';
 import { GatewayService } from './gateway.service';
 import { AuthModule } from '../auth/auth.module';
@@ -7,6 +8,6 @@ import { PolicyModule } from '../policy/policy.module';
 @Module({
   imports: [AuthModule, PolicyModule],
   controllers: [GatewayController],
-  providers: [GatewayService],
+  providers: [GatewayService, BillingMeteringService],
 })
 export class GatewayModule {}
