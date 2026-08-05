@@ -1,12 +1,31 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AuthDirectoryService } from '../../common/modules/auth-directory/auth-directory.service';
+import { PolicyStoreService } from './policy-store.service';
+import { evaluatePolicySet } from './policy-evaluator';
 import { PolicyDecision, PolicyInput } from './types';
 
 @Injectable()
 export class PolicyService {
-  constructor(private readonly authDirectory: AuthDirectoryService) {}
+  private readonly logger = new Logger(PolicyService.name);
+
+  constructor(
+    private readonly authDirectory: AuthDirectoryService,
+    private readonly policyStore: PolicyStoreService,
+  ) {}
 
   async decide(input: PolicyInput): Promise<PolicyDecision> {
+    // Layer 1: if this tenant has a compiled PolicySet loaded (via the LLM
+    // policy generator or a direct PUT /policies/:tenantId), evaluate it.
+    // The compiled policy takes precedence over the legacy hardcoded rules.
+    const stored = this.policyStore.get(input.tenantId);
+    if (stored) {
+      const decision = evaluatePolicySet(stored.policySet, input);
+      this.logger.debug(
+        `tenant=${input.tenantId} matched compiled policy: ${JSON.stringify(decision)}`,
+      );
+      return decision;
+    }
+
     const entitlements = await this.authDirectory.getTenantEntitlements(
       input.tenantId,
     );

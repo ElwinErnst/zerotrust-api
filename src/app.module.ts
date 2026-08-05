@@ -6,10 +6,12 @@ import jwtConfig from './config/jwt.config';
 import ztConfig from './config/zt.config';
 import upstreamsConfig from './config/upstreams.config';
 import { policiesConfig } from './config/policies.config';
+import policyGeneratorConfig from './config/policy-generator.config';
 import { AuthDirectoryModule } from './common/modules/auth-directory/auth-directory.module';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { PolicyModule } from './modules/policy/policy.module';
+import { PolicyGeneratorModule } from './modules/policy-generator/policy-generator.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AdminService } from './modules/admin/admin.service';
@@ -24,6 +26,7 @@ import { ApiAccessModule } from './modules/api-access/api-access.module';
         upstreamsConfig,
         ztConfig,
         policiesConfig,
+        policyGeneratorConfig,
         authDirectoryConfig,
         billingMeteringConfig,
       ],
@@ -31,6 +34,7 @@ import { ApiAccessModule } from './modules/api-access/api-access.module';
     AuthDirectoryModule,
     AuthModule,
     PolicyModule,
+    PolicyGeneratorModule,
     GatewayModule,
     AdminModule,
     ApiAccessModule,
