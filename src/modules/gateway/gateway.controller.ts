@@ -148,6 +148,7 @@ export class GatewayController {
       path: resolved.upstreamPath,
       tenantId: user.tenantId,
       roles: user.roles,
+      actorType: user.actorType ?? 'user',
     });
 
     if (!decision.allow) {

@@ -155,9 +155,13 @@ export const POLICY_FIXTURES: PolicyFixture[] = [
       { input: owner({ roles: ['OWNER'] }), expected: allow },
       { input: admin({ roles: ['ADMIN'] }), expected: allow },
       {
-        input: { ...owner(), roles: ['API_CLIENT'] },
+        input: {
+          ...owner(),
+          roles: ['API_CLIENT'],
+          actorType: 'service_account',
+        },
         expected: deny(),
-        note: 'service account role is not in OWNER/ADMIN allowlist',
+        note: 'service account is denied via actorTypeIn, not just the role list',
       },
     ],
   },

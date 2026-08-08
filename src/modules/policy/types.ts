@@ -8,4 +8,7 @@ export type PolicyInput = {
   path: string; // path ya “upstream-local” (sin /vault prefix)
   tenantId: string;
   roles: string[];
+  // Caller kind, from the JWT. Lets rules match on `actorTypeIn`
+  // (human vs machine) independently of the role list.
+  actorType?: 'user' | 'service_account';
 };
