@@ -50,9 +50,15 @@ function ruleMatches(rule: PolicyRule, input: PolicyInput): boolean {
       const hit = cond.roleIn.some((r) => input.roles.includes(r));
       if (!hit) return false;
     }
-    // actorTypeIn matches on the JWT actorType if it's carried on roles;
-    // when a real actorType field is on PolicyInput this becomes a direct
-    // comparison. For now, the roles array is the only signal.
+
+    // Match on the caller kind (human vs machine) carried by the JWT. A rule
+    // that constrains `actorTypeIn` only matches when the input's actorType is
+    // known and listed — so a `deny service_account` rule never trips a user.
+    if (cond.actorTypeIn && cond.actorTypeIn.length > 0) {
+      if (!input.actorType || !cond.actorTypeIn.includes(input.actorType)) {
+        return false;
+      }
+    }
   }
 
   return true;
