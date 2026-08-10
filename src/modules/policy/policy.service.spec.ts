@@ -4,11 +4,17 @@ describe('PolicyService', () => {
   const authDirectory = {
     getTenantEntitlements: jest.fn(),
   };
+  const policyStore = {
+    get: jest.fn(),
+  };
 
   let service: PolicyService;
 
   beforeEach(() => {
     jest.resetAllMocks();
+    // No compiled PolicySet for the tenant → decisions fall through to the
+    // entitlements layer these tests exercise.
+    policyStore.get.mockReturnValue(null);
     authDirectory.getTenantEntitlements.mockResolvedValue({
       planCode: 'BUSINESS',
       features: {
@@ -33,7 +39,7 @@ describe('PolicyService', () => {
       source: 'catalog',
     });
 
-    service = new PolicyService(authDirectory as never);
+    service = new PolicyService(authDirectory as never, policyStore as never);
   });
 
   it('allows API clients to list vaults', async () => {
