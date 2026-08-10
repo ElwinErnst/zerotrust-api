@@ -1,5 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import authDirectoryConfig from './config/auth-directory.config';
 import billingMeteringConfig from './config/billing-metering.config';
 import jwtConfig from './config/jwt.config';
@@ -31,6 +33,13 @@ import { ApiAccessModule } from './modules/api-access/api-access.module';
         billingMeteringConfig,
       ],
     }),
+    // Per-IP rate limiting for the gateway (300 req/min default, tunable via env).
+    ThrottlerModule.forRoot([
+      {
+        ttl: Number(process.env.THROTTLE_TTL_MS ?? 60_000),
+        limit: Number(process.env.THROTTLE_LIMIT ?? 300),
+      },
+    ]),
     AuthDirectoryModule,
     AuthModule,
     PolicyModule,
@@ -39,6 +48,7 @@ import { ApiAccessModule } from './modules/api-access/api-access.module';
     AdminModule,
     ApiAccessModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule implements OnModuleInit {
   constructor(private readonly admin: AdminService) {}
