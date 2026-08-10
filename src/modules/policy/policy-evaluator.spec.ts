@@ -63,3 +63,53 @@ describe('evaluatePolicySet — actorTypeIn matching', () => {
     expect(decision).toEqual({ allow: true });
   });
 });
+
+describe('evaluatePolicySet — /** covers the collection path', () => {
+  const subtreePolicy: PolicySet = {
+    version: 1,
+    default: 'deny',
+    rules: [
+      {
+        description: 'Allow ADMIN anywhere under /documents',
+        effect: 'allow',
+        when: { upstream: 'vault', pathGlob: '/documents/**' },
+        if: { roleIn: ['ADMIN'] },
+      },
+    ],
+  };
+
+  const admin = (path: string): PolicyInput => ({
+    upstream: 'vault',
+    method: 'GET',
+    path,
+    tenantId: 'tenant-a',
+    roles: ['ADMIN'],
+    actorType: 'user',
+  });
+
+  it('matches the bare collection path', () => {
+    // Regression guard: `/documents/**` previously compiled to `/documents/.*`,
+    // which did NOT match `/documents` (no trailing slash) — the over-denial bug.
+    expect(evaluatePolicySet(subtreePolicy, admin('/documents'))).toEqual({
+      allow: true,
+    });
+  });
+
+  it('matches nested paths under the collection', () => {
+    expect(evaluatePolicySet(subtreePolicy, admin('/documents/x'))).toEqual({
+      allow: true,
+    });
+    expect(evaluatePolicySet(subtreePolicy, admin('/documents/a/b/c'))).toEqual(
+      { allow: true },
+    );
+  });
+
+  it('does not match a sibling prefix or an unrelated path', () => {
+    expect(evaluatePolicySet(subtreePolicy, admin('/documentsfoo')).allow).toBe(
+      false,
+    );
+    expect(evaluatePolicySet(subtreePolicy, admin('/vaults')).allow).toBe(
+      false,
+    );
+  });
+});

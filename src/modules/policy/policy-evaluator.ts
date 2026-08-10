@@ -68,13 +68,26 @@ function ruleMatches(rule: PolicyRule, input: PolicyInput): boolean {
  * Tiny glob matcher: supports `*` (zero or more of any char except `/`)
  * and `**` (zero or more of any char). Anything else is literal.
  * Escapes regex metachars, then swaps globs for their regex equivalents.
+ *
+ * A trailing `/**` covers the collection itself as well as everything under it:
+ * `/documents/**` matches `/documents`, `/documents/x`, `/documents/a/b`. This
+ * is the natural reading of "everything under /documents" (the collection
+ * endpoint is part of the resource) and avoids policies that silently omit the
+ * bare collection path.
  */
 function globMatches(glob: string, value: string): boolean {
-  const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  const regexSrc = escaped
+  const subtree = glob.endsWith('/**');
+  const base = subtree ? glob.slice(0, -3) : glob;
+
+  const escaped = base.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  let regexSrc = escaped
     .replace(/\*\*/g, '::DOUBLESTAR::')
     .replace(/\*/g, '[^/]*')
     .replace(/::DOUBLESTAR::/g, '.*');
+
+  // `/documents/**` -> `/documents(/.*)?` so the bare collection path matches too.
+  if (subtree) regexSrc += '(/.*)?';
+
   const regex = new RegExp(`^${regexSrc}$`);
   return regex.test(value);
 }
