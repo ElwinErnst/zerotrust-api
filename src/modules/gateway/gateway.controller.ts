@@ -15,7 +15,11 @@ import { JwtVerifyService } from '../auth/jwt-verify.service';
 import { PolicyService } from '../policy/policy.service';
 import { BillingMeteringService } from '../../common/modules/billing-metering/billing-metering.service';
 import { GatewayService } from './gateway.service';
-import { signZtRequest } from '../../common/crypto/hmac-signer';
+import {
+  buildZtSigner,
+  signZt,
+  type ZtSigner,
+} from '../../common/crypto/zt-v2-signer';
 import type { ZtConfig } from './types/zt-config.type';
 
 function splitUrl(originalUrl: string): { path: string; query: string } {
@@ -111,7 +115,7 @@ async function resolveReqBodyToBuffer(
 
 @Controller('vault')
 export class GatewayController {
-  private readonly hmacSecret: string;
+  private readonly signer: ZtSigner;
 
   constructor(
     private readonly gw: GatewayService,
@@ -122,7 +126,7 @@ export class GatewayController {
   ) {
     const zt = cfg.get<ZtConfig>('zt');
     if (!zt) throw new Error('Missing zt config');
-    this.hmacSecret = zt.hmacSecret;
+    this.signer = buildZtSigner(zt);
   }
 
   /**
@@ -202,8 +206,7 @@ export class GatewayController {
       ? Buffer.alloc(0)
       : await resolveReqBodyToBuffer(req, maxBodyBytes);
 
-    const signed = signZtRequest({
-      secret: this.hmacSecret,
+    const signed = signZt(this.signer, {
       method: req.method,
       path: resolved.upstreamPath,
       query,
