@@ -9,11 +9,14 @@ import {
   Param,
   ParseUUIDPipe,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import { policySetSchema } from '../policy-generator/schema/policy.schema';
 import { PolicyStoreService } from './policy-store.service';
+import { PolicyAdminGuard } from './policy-admin.guard';
 
 @Controller('policies')
+@UseGuards(PolicyAdminGuard)
 export class PolicyStoreController {
   constructor(private readonly store: PolicyStoreService) {}
 
