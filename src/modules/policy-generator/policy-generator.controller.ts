@@ -1,11 +1,10 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { GeneratePolicyDto } from './dto/generate-policy.dto';
 import { PolicyGeneratorService } from './policy-generator.service';
+import { PolicyGenerateGuard } from './policy-generate.guard';
 
-// Note: this controller is intentionally minimal. Auth in front of the ZT
-// gateway is handled by the gateway module itself; when this endpoint is
-// exposed publicly it will sit behind a JWT + OWNER/ADMIN guard.
 @Controller('policies')
+@UseGuards(PolicyGenerateGuard)
 export class PolicyGeneratorController {
   constructor(private readonly generator: PolicyGeneratorService) {}
 
