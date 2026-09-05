@@ -4,17 +4,17 @@ describe('PolicyService', () => {
   const authDirectory = {
     getTenantEntitlements: jest.fn(),
   };
-  const policyStore = {
-    get: jest.fn(),
+  const tenantPolicy = {
+    resolve: jest.fn(),
   };
 
   let service: PolicyService;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    // No compiled PolicySet for the tenant → decisions fall through to the
+    // No published PolicySet for the tenant → decisions fall through to the
     // entitlements layer these tests exercise.
-    policyStore.get.mockReturnValue(null);
+    tenantPolicy.resolve.mockResolvedValue({ status: 'none' });
     authDirectory.getTenantEntitlements.mockResolvedValue({
       planCode: 'BUSINESS',
       features: {
@@ -39,7 +39,50 @@ describe('PolicyService', () => {
       source: 'catalog',
     });
 
-    service = new PolicyService(authDirectory as never, policyStore as never);
+    service = new PolicyService(authDirectory as never, tenantPolicy as never);
+  });
+
+  it('evaluates the published policy when present (precedence over RBAC)', async () => {
+    tenantPolicy.resolve.mockResolvedValueOnce({
+      status: 'found',
+      version: 4,
+      policySet: {
+        version: 1,
+        rules: [
+          {
+            description: 'deny all documents',
+            effect: 'deny',
+            when: { upstream: 'vault', pathGlob: '/documents*' },
+            reason: 'blocked by tenant policy',
+          },
+        ],
+        default: 'deny',
+      },
+    });
+
+    await expect(
+      service.decide({
+        upstream: 'vault',
+        method: 'GET',
+        path: '/documents',
+        tenantId: 'tenant-1',
+        roles: ['ADMIN'],
+      }),
+    ).resolves.toEqual({ allow: false, reason: 'blocked by tenant policy' });
+  });
+
+  it('fails closed (deny) when the policy service is unavailable', async () => {
+    tenantPolicy.resolve.mockResolvedValueOnce({ status: 'error' });
+
+    await expect(
+      service.decide({
+        upstream: 'vault',
+        method: 'GET',
+        path: '/documents',
+        tenantId: 'tenant-1',
+        roles: ['ADMIN'],
+      }),
+    ).resolves.toEqual({ allow: false, reason: 'Policy service unavailable' });
   });
 
   it('allows API clients to list vaults', async () => {
