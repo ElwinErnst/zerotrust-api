@@ -14,8 +14,8 @@ const ADMIN_ROLES = new Set(['OWNER', 'ADMIN']);
  * Authorizes the LLM policy generator (`POST /policies/generate`).
  *
  * Deny-by-default: requires a valid access token and an OWNER/ADMIN caller.
- * The generator does not persist (its output must still be PUT through the
- * tenant-scoped PolicyAdminGuard), so this guard's job is to stop unauthenticated
+ * The generator does not persist (its output is published through auth-api's
+ * tenant-scoped policy admin API), so this guard's job is to stop unauthenticated
  * use of an LLM-backed endpoint (cost/abuse), not to enforce tenant scope. The
  * request is scoped by `tenantSlug` in the body; binding that to the caller's
  * tenant is a separate, optional follow-up.

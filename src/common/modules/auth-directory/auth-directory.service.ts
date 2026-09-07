@@ -42,6 +42,11 @@ export type RemoteTenantEntitlements = {
     | 'billing_bypass';
 };
 
+export type RemoteTenantPolicy = {
+  policySet: unknown; // schema owned/validated by zerotrust-api
+  version: number;
+};
+
 @Injectable()
 export class AuthDirectoryService {
   private readonly cfg: AuthDirectoryConfig;
@@ -55,6 +60,18 @@ export class AuthDirectoryService {
   ): Promise<RemoteTenantEntitlements | null> {
     const url = this.buildUrl(`internal/tenants/${tenantId}/entitlements`);
     return this.fetchJson<RemoteTenantEntitlements>(url.toString(), {
+      allow404: true,
+    });
+  }
+
+  /**
+   * The tenant's currently published Zero Trust policy, or null when the tenant
+   * has none (auth-api returns 404). Any other failure throws — the caller must
+   * fail closed rather than treat an unreachable auth-api as "no policy".
+   */
+  async getTenantPolicy(tenantId: string): Promise<RemoteTenantPolicy | null> {
+    const url = this.buildUrl(`internal/tenants/${tenantId}/policy`);
+    return this.fetchJson<RemoteTenantPolicy>(url.toString(), {
       allow404: true,
     });
   }

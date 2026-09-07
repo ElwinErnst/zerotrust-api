@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuthDirectoryService } from '../../common/modules/auth-directory/auth-directory.service';
-import { PolicyStoreService } from './policy-store.service';
+import { TenantPolicyProvider } from './tenant-policy-provider';
 import { evaluatePolicySet } from './policy-evaluator';
 import { PolicyDecision, PolicyInput } from './types';
 
@@ -10,18 +10,22 @@ export class PolicyService {
 
   constructor(
     private readonly authDirectory: AuthDirectoryService,
-    private readonly policyStore: PolicyStoreService,
+    private readonly tenantPolicy: TenantPolicyProvider,
   ) {}
 
   async decide(input: PolicyInput): Promise<PolicyDecision> {
-    // Layer 1: if this tenant has a compiled PolicySet loaded (via the LLM
-    // policy generator or a direct PUT /policies/:tenantId), evaluate it.
-    // The compiled policy takes precedence over the legacy hardcoded rules.
-    const stored = this.policyStore.get(input.tenantId);
-    if (stored) {
-      const decision = evaluatePolicySet(stored.policySet, input);
+    // Layer 1: the tenant's published PolicySet, owned by auth-api and read
+    // (cached) here. It takes precedence over the legacy hardcoded rules.
+    //  - error → fail closed (deny); never fall through on an outage.
+    //  - none  → no custom policy; fall through to entitlement/role rules.
+    const resolution = await this.tenantPolicy.resolve(input.tenantId);
+    if (resolution.status === 'error') {
+      return { allow: false, reason: 'Policy service unavailable' };
+    }
+    if (resolution.status === 'found') {
+      const decision = evaluatePolicySet(resolution.policySet, input);
       this.logger.debug(
-        `tenant=${input.tenantId} matched compiled policy: ${JSON.stringify(decision)}`,
+        `tenant=${input.tenantId} matched compiled policy v${resolution.version}: ${JSON.stringify(decision)}`,
       );
       return decision;
     }
