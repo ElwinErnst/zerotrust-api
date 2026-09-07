@@ -18,11 +18,48 @@ export class PolicyService {
     // (cached) here. It takes precedence over the legacy hardcoded rules.
     //  - error → fail closed (deny); never fall through on an outage.
     //  - none  → no custom policy; fall through to entitlement/role rules.
+    // Resolve the tenant's published policy up front. On an outage we must
+    // fail closed before doing anything else.
     const resolution = await this.tenantPolicy.resolve(input.tenantId);
     if (resolution.status === 'error') {
       return { allow: false, reason: 'Policy service unavailable' };
     }
-    if (resolution.status === 'found') {
+
+    // Entitlements are the plan ceiling and are ALWAYS enforced — a custom
+    // policy may only restrict access further, never grant beyond the plan.
+    const entitlements = await this.authDirectory.getTenantEntitlements(
+      input.tenantId,
+    );
+    if (!entitlements) {
+      return { allow: false, reason: 'Tenant entitlements not found' };
+    }
+
+    const isApiClient = !this.hasHumanRole(input.roles);
+
+    // Only 'vault' is proxied today; unknown upstreams are denied regardless of
+    // any policy rule that might mention them.
+    if (input.upstream !== 'vault') {
+      return { allow: false, reason: 'Unknown upstream' };
+    }
+
+    // Feature ceiling for Vault — applies whether or not a custom policy exists.
+    if (!entitlements.features.vaults) {
+      return {
+        allow: false,
+        reason: 'Vault access is not enabled for this tenant plan',
+      };
+    }
+    if (isApiClient && !entitlements.features.apiVault) {
+      return {
+        allow: false,
+        reason: 'Vault API Pack is not enabled for this tenant',
+      };
+    }
+
+    // Custom policy takes precedence over the built-in RBAC, but only when the
+    // plan includes ZT policies AND one is published. It is evaluated within the
+    // feature ceiling already enforced above.
+    if (resolution.status === 'found' && entitlements.features.ztPolicies) {
       const decision = evaluatePolicySet(resolution.policySet, input);
       this.logger.debug(
         `tenant=${input.tenantId} matched compiled policy v${resolution.version}: ${JSON.stringify(decision)}`,
@@ -30,52 +67,19 @@ export class PolicyService {
       return decision;
     }
 
-    const entitlements = await this.authDirectory.getTenantEntitlements(
-      input.tenantId,
-    );
-
-    if (!entitlements) {
-      return { allow: false, reason: 'Tenant entitlements not found' };
+    // Fallback: built-in RBAC (no custom policy, or plan lacks ZT policies).
+    if (isApiClient) {
+      return this.allowApiClientVaultRoute(input);
     }
 
-    const isApiClient = !this.hasHumanRole(input.roles);
-
-    // MVP: reglas para Vault
-    if (input.upstream === 'vault') {
-      if (!entitlements.features.vaults) {
-        return {
-          allow: false,
-          reason: 'Vault access is not enabled for this tenant plan',
-        };
-      }
-
-      // Los clientes API no comparten la misma política que el workspace humano.
-      // Si el token no trae roles humanos, tratamos el request como integración externa.
-      if (isApiClient) {
-        if (!entitlements.features.apiVault) {
-          return {
-            allow: false,
-            reason: 'Vault API Pack is not enabled for this tenant',
-          };
-        }
-
-        return this.allowApiClientVaultRoute(input);
-      }
-
-      // Ejemplos:
-      // - listar docs: MEMBER
-      // - subir/borrar: ADMIN
-      if (input.path.startsWith('/documents')) {
-        if (input.method === 'GET') return this.requireRole(input, 'MEMBER');
-        if (input.method === 'POST') return this.requireRole(input, 'ADMIN');
-        if (input.method === 'DELETE') return this.requireRole(input, 'ADMIN');
-      }
-
-      // default: MEMBER para el resto (ajustable)
-      return this.requireRole(input, 'MEMBER');
+    if (input.path.startsWith('/documents')) {
+      if (input.method === 'GET') return this.requireRole(input, 'MEMBER');
+      if (input.method === 'POST') return this.requireRole(input, 'ADMIN');
+      if (input.method === 'DELETE') return this.requireRole(input, 'ADMIN');
     }
 
-    return { allow: false, reason: 'Unknown upstream' };
+    // default: MEMBER for the rest (adjustable)
+    return this.requireRole(input, 'MEMBER');
   }
 
   private requireRole(input: PolicyInput, role: string): PolicyDecision {
