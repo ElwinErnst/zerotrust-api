@@ -1,3 +1,4 @@
+import { Test } from '@nestjs/testing';
 import { AuthDirectoryService } from '../../common/modules/auth-directory/auth-directory.service';
 import { TenantPolicyProvider } from './tenant-policy-provider';
 
@@ -15,13 +16,13 @@ const validPolicySet = {
   default: 'deny',
 };
 
-function providerWith(
-  getTenantPolicy: jest.Mock,
-  ttlMs = 30_000,
-): { provider: TenantPolicyProvider; getTenantPolicy: jest.Mock } {
+function providerWith(getTenantPolicy: jest.Mock): {
+  provider: TenantPolicyProvider;
+  getTenantPolicy: jest.Mock;
+} {
   const authDirectory = { getTenantPolicy } as unknown as AuthDirectoryService;
   return {
-    provider: new TenantPolicyProvider(authDirectory, ttlMs),
+    provider: new TenantPolicyProvider(authDirectory),
     getTenantPolicy,
   };
 }
@@ -88,5 +89,23 @@ describe('TenantPolicyProvider', () => {
       status: 'found',
     });
     expect(getTenantPolicy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('TenantPolicyProvider DI', () => {
+  it('resolves via Nest with only AuthDirectoryService (no primitive ctor arg)', async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        TenantPolicyProvider,
+        {
+          provide: AuthDirectoryService,
+          useValue: { getTenantPolicy: jest.fn() },
+        },
+      ],
+    }).compile();
+
+    expect(moduleRef.get(TenantPolicyProvider)).toBeInstanceOf(
+      TenantPolicyProvider,
+    );
   });
 });

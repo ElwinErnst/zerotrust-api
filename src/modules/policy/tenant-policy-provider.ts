@@ -31,11 +31,11 @@ const DEFAULT_TTL_MS = Number(process.env.ZT_POLICY_CACHE_TTL_MS ?? 30_000);
 export class TenantPolicyProvider {
   private readonly logger = new Logger(TenantPolicyProvider.name);
   private readonly cache = new Map<string, CacheEntry>();
+  // Not a constructor parameter: Nest cannot inject a primitive `number`, so a
+  // second ctor arg would fail DI at boot. Read from env at construction.
+  private readonly ttlMs = DEFAULT_TTL_MS;
 
-  constructor(
-    private readonly authDirectory: AuthDirectoryService,
-    private readonly ttlMs: number = DEFAULT_TTL_MS,
-  ) {}
+  constructor(private readonly authDirectory: AuthDirectoryService) {}
 
   async resolve(tenantId: string): Promise<PolicyResolution> {
     const cached = this.cache.get(tenantId);
