@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtVerifyService } from '../auth/jwt-verify.service';
 import { PolicyService } from '../policy/policy.service';
 import { BillingMeteringService } from '../../common/modules/billing-metering/billing-metering.service';
+import { AuditService } from '../audit/audit.service';
 import { GatewayService } from './gateway.service';
 import {
   buildZtSigner,
@@ -122,6 +123,7 @@ export class GatewayController {
     private readonly jwt: JwtVerifyService,
     private readonly policy: PolicyService,
     private readonly billingMetering: BillingMeteringService,
+    private readonly audit: AuditService,
     cfg: ConfigService,
   ) {
     const zt = cfg.get<ZtConfig>('zt');
@@ -153,6 +155,27 @@ export class GatewayController {
       tenantId: user.tenantId,
       roles: user.roles,
       actorType: user.actorType ?? 'user',
+    });
+
+    // Fire-and-forget: the decision log must never add latency to or break the
+    // enforcement path (emit is fail-open internally). Records both allow and
+    // deny — the runtime decision audit for the unified timeline.
+    void this.audit.emit({
+      tenantId: user.tenantId,
+      system: 'zerotrust',
+      category: 'decision',
+      action: `${req.method} ${resolved.upstream.name}`,
+      actorType: user.actorType ?? 'user',
+      actorId: user.sub,
+      resourceType: 'upstream',
+      resourceId: resolved.upstream.name,
+      outcome: decision.allow ? 'allow' : 'deny',
+      detail: {
+        method: req.method,
+        path: resolved.upstreamPath,
+        reason:
+          !decision.allow && 'reason' in decision ? decision.reason : null,
+      },
     });
 
     if (!decision.allow) {
