@@ -58,6 +58,24 @@ export class AuditService {
     }
   }
 
+  /**
+   * Delete events older than `retentionDays`, keeping the high-volume decision
+   * log bounded. Returns the number of rows removed. A retention of 0 (or less)
+   * is a no-op so purging can be disabled via config.
+   */
+  async purgeOlderThan(retentionDays: number): Promise<number> {
+    if (!Number.isFinite(retentionDays) || retentionDays <= 0) return 0;
+
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const result = await this.repo
+      .createQueryBuilder()
+      .delete()
+      .where('occurred_at < :cutoff', { cutoff })
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
   async list(
     tenantId: string,
     options: ListAuditEventsOptions = {},
