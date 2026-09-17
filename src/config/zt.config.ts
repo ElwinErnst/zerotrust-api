@@ -24,4 +24,10 @@ export default registerAs('zt', () => ({
   // Ed25519 private key (PEM, or base64-encoded PEM). Secret — never logged or
   // returned. Only required when signMode is 'ed25519'.
   signingPrivateKey: process.env.ZT_SIGNING_PRIVATE_KEY ?? '',
+  // Decision-log retention: rows older than this are purged periodically so the
+  // high-volume audit_events table stays bounded. 0 disables purging.
+  auditRetentionDays: Math.max(
+    0,
+    Math.floor(Number(process.env.ZT_AUDIT_RETENTION_DAYS ?? 90)) || 0,
+  ),
 }));
