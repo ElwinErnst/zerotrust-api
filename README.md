@@ -71,4 +71,4 @@ Desde la raíz del meta-repo, `docker compose up --build`. En la red interna alc
 
 ## Licencia
 
-Apache-2.0. Ver [LICENSE](./LICENSE).
+PolyForm Strict 1.0.0 (source-available, uso no comercial). Ver [LICENSE](./LICENSE).
