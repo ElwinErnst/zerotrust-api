@@ -1,7 +1,9 @@
 import {
   All,
+  BadGatewayException,
   Controller,
   ForbiddenException,
+  GatewayTimeoutException,
   NotFoundException,
   Req,
   Res,
@@ -10,6 +12,11 @@ import type { Request, Response } from 'express';
 import { request as undiciRequest } from 'undici';
 import { randomUUID } from 'crypto';
 import { ConfigService } from '@nestjs/config';
+
+import {
+  assertUpstreamUrlSafe,
+  SsrfBlockedError,
+} from '../../common/http/ssrf';
 
 import { JwtVerifyService } from '../auth/jwt-verify.service';
 import { PolicyService } from '../policy/policy.service';
@@ -114,7 +121,13 @@ async function resolveReqBodyToBuffer(
   return readReqBodyToBuffer(req, maxBytes);
 }
 
-@Controller('vault')
+// Max wall-clock for a single upstream round-trip before the gateway aborts.
+const UPSTREAM_TIMEOUT_MS = 15_000;
+
+// `vault` keeps its historical mount at /vault; registered upstreams are reached
+// under the reserved /gw namespace. Both base paths route to the same handler,
+// which selects the concrete upstream via GatewayService.resolve().
+@Controller(['vault', 'gw'])
 export class GatewayController {
   private readonly signer: ZtSigner;
 
@@ -184,6 +197,9 @@ export class GatewayController {
       );
     }
 
+    // Metering is vault-specific (metric names + VAULT_API addon). Registered
+    // non-vault upstreams are intentionally not metered in this slice; generic
+    // per-upstream metering is deferred to the self-service phase.
     const isApiClient = user.roles.includes('API_CLIENT');
     if (isApiClient && resolved.upstream.name === 'vault') {
       const metrics = ['vault_api_requests'];
@@ -251,15 +267,44 @@ export class GatewayController {
       'x-tenant-id': user.tenantId,
     };
 
+    // Built-in upstreams (vault) point at an operator-configured base URL and are
+    // trusted. Registered upstreams carry a tenant/operator-supplied base URL, so
+    // we validate it against SSRF ranges before connecting.
+    if (!this.gw.isBuiltin(resolved.upstream.name)) {
+      try {
+        await assertUpstreamUrlSafe(resolved.upstream.baseUrl);
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          throw new ForbiddenException('Upstream target is not allowed');
+        }
+        throw err;
+      }
+    }
+
     const url = new URL(resolved.upstream.baseUrl);
     url.pathname = resolved.upstreamPath;
     url.search = query;
 
-    const upstreamRes = await undiciRequest(url.toString(), {
-      method: req.method,
-      headers,
-      body: isBodyless(req.method) ? undefined : bodyBuf,
-    });
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), UPSTREAM_TIMEOUT_MS);
+    let upstreamRes: Awaited<ReturnType<typeof undiciRequest>>;
+    try {
+      upstreamRes = await undiciRequest(url.toString(), {
+        method: req.method,
+        headers,
+        body: isBodyless(req.method) ? undefined : bodyBuf,
+        // undici's request() does not follow redirects by default, so an upstream
+        // cannot bounce us to an internal address (SSRF pivot) via 3xx.
+        signal: abort.signal,
+      });
+    } catch (err) {
+      if (abort.signal.aborted) {
+        throw new GatewayTimeoutException('Upstream timed out');
+      }
+      throw new BadGatewayException('Upstream request failed');
+    } finally {
+      clearTimeout(timeout);
+    }
 
     res.status(upstreamRes.statusCode);
 
