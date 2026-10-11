@@ -1,4 +1,9 @@
+import { lookup } from 'dns/promises';
 import { assertUpstreamUrlSafe, isBlockedIp, SsrfBlockedError } from './ssrf';
+
+jest.mock('dns/promises', () => ({ lookup: jest.fn() }));
+
+const lookupMock = lookup as unknown as jest.Mock;
 
 describe('isBlockedIp', () => {
   it.each([
@@ -23,6 +28,8 @@ describe('isBlockedIp', () => {
 });
 
 describe('assertUpstreamUrlSafe', () => {
+  beforeEach(() => lookupMock.mockReset());
+
   it('rejects the cloud metadata address', async () => {
     await expect(
       assertUpstreamUrlSafe('http://169.254.169.254/latest/meta-data'),
@@ -44,7 +51,51 @@ describe('assertUpstreamUrlSafe', () => {
     );
   });
 
-  it('allows a public IP literal', async () => {
-    await expect(assertUpstreamUrlSafe('https://8.8.8.8/health')).resolves.toBeUndefined();
+  it('returns the address for a public IP literal (no DNS lookup)', async () => {
+    await expect(assertUpstreamUrlSafe('https://8.8.8.8/health')).resolves.toEqual([
+      '8.8.8.8',
+    ]);
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  // --- hostname / DNS resolution path (the DNS-rebind defense) ---
+
+  it('resolves a hostname and returns its validated public addresses', async () => {
+    lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    await expect(assertUpstreamUrlSafe('https://example.com/api')).resolves.toEqual([
+      '93.184.216.34',
+    ]);
+    expect(lookupMock).toHaveBeenCalledWith('example.com', { all: true });
+  });
+
+  it('rejects a hostname that resolves to a blocked (internal) address', async () => {
+    lookupMock.mockResolvedValue([{ address: '169.254.169.254', family: 4 }]);
+    await expect(assertUpstreamUrlSafe('https://rebind.evil/')).rejects.toBeInstanceOf(
+      SsrfBlockedError,
+    );
+  });
+
+  it('rejects if ANY resolved address is blocked (mixed records)', async () => {
+    lookupMock.mockResolvedValue([
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.5', family: 4 },
+    ]);
+    await expect(assertUpstreamUrlSafe('https://split.evil/')).rejects.toBeInstanceOf(
+      SsrfBlockedError,
+    );
+  });
+
+  it('rejects when the host cannot be resolved', async () => {
+    lookupMock.mockRejectedValue(new Error('ENOTFOUND'));
+    await expect(assertUpstreamUrlSafe('https://nope.invalid/')).rejects.toBeInstanceOf(
+      SsrfBlockedError,
+    );
+  });
+
+  it('rejects when resolution yields no addresses', async () => {
+    lookupMock.mockResolvedValue([]);
+    await expect(assertUpstreamUrlSafe('https://empty.example/')).rejects.toBeInstanceOf(
+      SsrfBlockedError,
+    );
   });
 });

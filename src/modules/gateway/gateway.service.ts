@@ -44,11 +44,24 @@ export class GatewayService {
     return null;
   }
 
-  /** Built-in (operator-trusted) upstreams first, then file-registered ones. */
+  /**
+   * Built-in (operator-trusted) upstreams first, then file-registered ones.
+   * A failure reading the untrusted file registry must never break resolution
+   * of the built-in vault route, so it is isolated and falls back to built-ins.
+   */
   private allUpstreams(): UpstreamConfig[] {
-    const registered = this.admin
-      .getUpstreams()
-      .upstreams.filter((u) => this.isRegisterable(u));
+    let registered: UpstreamConfig[] = [];
+    try {
+      registered = this.admin
+        .getUpstreams()
+        .upstreams.filter((u) => this.isRegisterable(u));
+    } catch (err) {
+      this.logger.error(
+        `Failed to read upstream registry; serving built-in upstreams only: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
     return [...this.builtinUpstreams, ...registered];
   }
 

@@ -9,7 +9,8 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { request as undiciRequest } from 'undici';
+import { Agent, request as undiciRequest } from 'undici';
+import { isIP, type LookupFunction } from 'net';
 import { randomUUID } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 
@@ -86,6 +87,27 @@ function shouldForwardResponseHeader(name: string): boolean {
     'upgrade',
     'content-length',
   ].includes(key);
+}
+
+/**
+ * Build a DNS lookup that always resolves to the pre-validated addresses. Used
+ * to pin an outbound connection to the exact address the SSRF guard checked, so
+ * undici cannot independently re-resolve the hostname to an internal address
+ * between validation and connect (DNS-rebind TOCTOU).
+ */
+function pinnedLookup(addresses: string[]): LookupFunction {
+  const entries = addresses.map((address) => ({
+    address,
+    family: isIP(address) || 4,
+  }));
+
+  return (_hostname, options, callback) => {
+    if (options.all) {
+      callback(null, entries);
+      return;
+    }
+    callback(null, entries[0].address, entries[0].family);
+  };
 }
 
 /**
@@ -270,9 +292,10 @@ export class GatewayController {
     // Built-in upstreams (vault) point at an operator-configured base URL and are
     // trusted. Registered upstreams carry a tenant/operator-supplied base URL, so
     // we validate it against SSRF ranges before connecting.
+    let pinnedAddresses: string[] | null = null;
     if (!this.gw.isBuiltin(resolved.upstream.name)) {
       try {
-        await assertUpstreamUrlSafe(resolved.upstream.baseUrl);
+        pinnedAddresses = await assertUpstreamUrlSafe(resolved.upstream.baseUrl);
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           throw new ForbiddenException('Upstream target is not allowed');
@@ -285,6 +308,13 @@ export class GatewayController {
     url.pathname = resolved.upstreamPath;
     url.search = query;
 
+    // Pin the dispatcher's DNS lookup to the already-validated addresses so the
+    // connection reuses exactly what the SSRF guard checked (closes the DNS-rebind
+    // TOCTOU). Host header and TLS SNI still use the original hostname.
+    const dispatcher = pinnedAddresses
+      ? new Agent({ connect: { lookup: pinnedLookup(pinnedAddresses) } })
+      : undefined;
+
     const abort = new AbortController();
     const timeout = setTimeout(() => abort.abort(), UPSTREAM_TIMEOUT_MS);
     let upstreamRes: Awaited<ReturnType<typeof undiciRequest>>;
@@ -296,6 +326,7 @@ export class GatewayController {
         // undici's request() does not follow redirects by default, so an upstream
         // cannot bounce us to an internal address (SSRF pivot) via 3xx.
         signal: abort.signal,
+        dispatcher,
       });
     } catch (err) {
       if (abort.signal.aborted) {
@@ -304,6 +335,7 @@ export class GatewayController {
       throw new BadGatewayException('Upstream request failed');
     } finally {
       clearTimeout(timeout);
+      if (dispatcher) void dispatcher.close();
     }
 
     res.status(upstreamRes.statusCode);

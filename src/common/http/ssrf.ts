@@ -48,10 +48,12 @@ function isBlockedIpv6(ip: string): boolean {
 
 /**
  * Validate that `rawUrl` is a public http(s) endpoint. Resolves every A/AAAA
- * record and rejects if ANY resolves to a blocked range — a basic DNS-rebind
- * defense: we validate what the connection would actually reach.
+ * record and rejects if ANY resolves to a blocked range, then RETURNS the
+ * validated addresses so the caller can pin the outbound connection to exactly
+ * what was checked. Returning (instead of discarding) the addresses is what
+ * closes the DNS-rebind TOCTOU: the connection must reuse these, not re-resolve.
  */
-export async function assertUpstreamUrlSafe(rawUrl: string): Promise<void> {
+export async function assertUpstreamUrlSafe(rawUrl: string): Promise<string[]> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -64,9 +66,7 @@ export async function assertUpstreamUrlSafe(rawUrl: string): Promise<void> {
   }
 
   const host = url.hostname;
-  const addresses = isIP(host)
-    ? [host]
-    : await resolveHost(host);
+  const addresses = isIP(host) ? [host] : await resolveHost(host);
 
   if (addresses.length === 0) {
     throw new SsrfBlockedError(`No addresses for host: ${host}`);
@@ -79,6 +79,8 @@ export async function assertUpstreamUrlSafe(rawUrl: string): Promise<void> {
       );
     }
   }
+
+  return addresses;
 }
 
 async function resolveHost(host: string): Promise<string[]> {

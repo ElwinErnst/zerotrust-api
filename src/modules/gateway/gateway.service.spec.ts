@@ -68,4 +68,15 @@ describe('GatewayService', () => {
     expect(gw.isBuiltin('vault')).toBe(true);
     expect(gw.isBuiltin('myapp')).toBe(false);
   });
+
+  it('keeps routing the built-in vault when the file registry read throws', () => {
+    // A failure reading the untrusted registry must not break the vault route.
+    const gw = build();
+    admin.getUpstreams.mockImplementation(() => {
+      throw new Error('registry unavailable');
+    });
+    const resolved = gw.resolve(makeReq('/vault/documents'));
+    expect(resolved?.upstream.name).toBe('vault');
+    expect(resolved?.upstreamPath).toBe('/documents');
+  });
 });
